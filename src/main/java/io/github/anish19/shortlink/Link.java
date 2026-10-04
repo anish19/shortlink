@@ -3,6 +3,7 @@ package io.github.anish19.shortlink;
 import jakarta.persistence.*;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 @Entity
 @Table(name = "links")
@@ -13,7 +14,7 @@ public class Link {
     private String shortCode;
     private String longUrl;
     private Long userId;
-    private Instant createdAt = Instant.now();
+    private Instant createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
     private Instant expiresAt;
 
     public Instant getExpiresAt() {

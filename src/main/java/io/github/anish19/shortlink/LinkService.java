@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
 @Service
@@ -33,7 +34,7 @@ public class LinkService {
             Link link = new Link();
             link.setUserId(1L); // TODO: use the logged in user
             link.setShortCode(shortCode);
-            link.setCreatedAt(Instant.now());
+            link.setCreatedAt(Instant.now().truncatedTo(ChronoUnit.MICROS));
             link.setLongUrl(longUrl);
             try {
                 linkRepository.saveAndFlush(link);
