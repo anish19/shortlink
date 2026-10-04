@@ -27,6 +27,12 @@ public class LinkController {
         return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(linkService.findByShortCode(code))).build();
     }
 
+    @DeleteMapping("/links/{code}")
+    public ResponseEntity<Void> deleteUrl(@PathVariable String code) {
+        linkService.deleteLink(code);
+        return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+    }
+
     @ExceptionHandler(LinkNotFoundException.class)
     public ResponseEntity<Void> handleLinkNotFoundException(){
         return ResponseEntity.status(HttpStatus.NOT_FOUND).build();

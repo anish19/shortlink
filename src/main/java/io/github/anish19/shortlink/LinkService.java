@@ -55,4 +55,12 @@ public class LinkService {
         }
         return link.get().getLongUrl();
     }
+
+    public void deleteLink(String shortCode) {
+        Link link = linkRepository.findByShortCode(shortCode).orElseThrow(() -> new LinkNotFoundException("Short code not found"));
+        if (!link.getUserId().equals(1L)) {
+            throw new LinkNotFoundException("Short code not found.");
+        }
+        linkRepository.delete(link);
+    }
 }
