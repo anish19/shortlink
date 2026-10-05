@@ -20,6 +20,12 @@ public class LinkController {
         return ResponseEntity.created(URI.create("/" + linkService.createLink(request.url()))).build();
     }
 
+    @GetMapping("/links")
+    public ResponseEntity<LinkPage> getLinks(@RequestParam(required = false) String cursor,
+                                             @RequestParam(defaultValue = "20") int limit) {
+        return ResponseEntity.ok().body(linkService.listLinks(cursor, limit));
+    }
+
     @GetMapping("/{code}")
     public ResponseEntity<Void> getUrl(@PathVariable String code) {
         // Return 302, so browser asks our server every time and so expiring or deleting a link takes effect
