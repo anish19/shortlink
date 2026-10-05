@@ -42,4 +42,9 @@ public class LinkController {
     public ResponseEntity<Void> handleLinkExpiredException(){
         return ResponseEntity.status(HttpStatus.GONE).build();
     }
+
+    @ExceptionHandler(InvalidCursorException.class)
+    public ResponseEntity<Void> handleInvalidCursorException(){
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+    }
 }
