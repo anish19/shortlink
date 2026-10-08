@@ -2,11 +2,13 @@ package io.github.anish19.shortlink;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -22,10 +24,15 @@ public class LinkService {
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private final SecureRandom random = new SecureRandom();
     private final long TEMP_DEV_USER_ID = 1L;
+    private static final String CACHE_PREFIX = "link:";
+    private static final Duration DEFAULT_REDIS_TTL = Duration.ofMinutes(10);
 
     private final LinkRepository linkRepository;
-    LinkService(LinkRepository linkRepository){
+    private final StringRedisTemplate redis;
+
+    LinkService(LinkRepository linkRepository, StringRedisTemplate redis) {
         this.linkRepository = linkRepository;
+        this.redis = redis;
     }
 
     private String encodeCursor(Link last) {
@@ -97,12 +104,32 @@ public class LinkService {
     }
 
     public String findByShortCode(String shortCode) {
+        String redisKey = CACHE_PREFIX + shortCode;
+        String valueInRedis = redis.opsForValue().get(redisKey);
+        if (valueInRedis == null) {
+            System.out.println("Redis doesn't have entry for " + shortCode);
+        } else {
+            System.out.println("Redis has entry for " + shortCode);
+            return valueInRedis;
+        }
         Optional<Link> link = linkRepository.findByShortCode(shortCode);
         if (link.isEmpty()) {
             throw new LinkNotFoundException("Given shortCode is not registered.");
         } else if (link.get().getExpiresAt() != null &&
                 link.get().getExpiresAt().isBefore(Instant.now())) {
             throw new LinkExpiredException(String.format("The shortCode for given link expired on %s.", link.get().getExpiresAt()));
+        }
+
+        Duration redisTTL = DEFAULT_REDIS_TTL;
+        if (link.get().getExpiresAt() != null) {
+            Duration untilExpiry = Duration.between(Instant.now(), link.get().getExpiresAt());
+            if (untilExpiry.compareTo(redisTTL) < 0) {
+                redisTTL = untilExpiry;
+            }
+        }
+
+        if (redisTTL.isPositive()) {
+            redis.opsForValue().set(redisKey, link.get().getLongUrl(), redisTTL);
         }
         return link.get().getLongUrl();
     }
@@ -113,6 +140,7 @@ public class LinkService {
             throw new LinkNotFoundException("Short code not found.");
         }
         linkRepository.delete(link);
+        redis.delete(CACHE_PREFIX + shortCode);
     }
 
     private boolean isShortCodeCollision(DataIntegrityViolationException e) {
