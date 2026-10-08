@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -86,6 +87,10 @@ public class LinkService {
                 return shortCode;
             } catch (DataIntegrityViolationException e) {
                 //short code collision, retry with new code.
+                // Only a short-code collision should retry; anything else is a real error
+                if (!isShortCodeCollision(e)) {
+                    throw e;
+                }
             }
         }
         throw new IllegalStateException("Could not generate unique code.");
@@ -108,5 +113,12 @@ public class LinkService {
             throw new LinkNotFoundException("Short code not found.");
         }
         linkRepository.delete(link);
+    }
+
+    private boolean isShortCodeCollision(DataIntegrityViolationException e) {
+        Throwable cause = e.getMostSpecificCause();
+        return cause instanceof SQLException sql
+                && "23505".equals(sql.getSQLState())
+                && cause.getMessage().contains("links_short_code_key");
     }
 }
