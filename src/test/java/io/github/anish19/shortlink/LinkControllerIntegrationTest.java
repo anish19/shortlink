@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -19,6 +20,9 @@ class LinkControllerIntegrationTest {
     @Autowired
     private LinkService linkService;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private final String LONG_URL = "https://www.example.com/home";
     private final String RANDOM_SHORT_CODE = "plokij";
 
@@ -26,6 +30,10 @@ class LinkControllerIntegrationTest {
     void setUp() {
         // Clear the database before each test
         linkRepository.deleteAll();
+        jdbcTemplate.update(
+                "INSERT INTO users (id, email, password_hash) OVERRIDING SYSTEM VALUE " +
+                "VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING",
+                1L, "dev@example.com", "test-hash");
     }
 
     // Test: create a new short link with a valid URL
