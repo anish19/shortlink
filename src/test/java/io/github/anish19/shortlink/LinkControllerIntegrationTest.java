@@ -4,11 +4,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.time.Duration;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static io.github.anish19.shortlink.LinkService.NEGATIVE_CACHE_ENTRY;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -23,8 +26,12 @@ class LinkControllerIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private StringRedisTemplate redis;
+
     private final String LONG_URL = "https://www.example.com/home";
     private final String RANDOM_SHORT_CODE = "plokij";
+    private final String CACHED_AS_NOT_FOUND_CODE = "zzzzzzz";
 
     @BeforeEach
     void setUp() {
@@ -34,6 +41,7 @@ class LinkControllerIntegrationTest {
                 "INSERT INTO users (id, email, password_hash) OVERRIDING SYSTEM VALUE " +
                 "VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING",
                 1L, "dev@example.com", "test-hash");
+        redis.delete("link:" + CACHED_AS_NOT_FOUND_CODE);
     }
 
     // Test: create a new short link with a valid URL
@@ -127,5 +135,34 @@ class LinkControllerIntegrationTest {
         assertThrows(InvalidCursorException.class, ()->{
             linkService.listLinks("invalid_base!", 10);
         });
+    }
+
+    @Test
+    void shouldReturnNotFoundFromRedisEvenWhenRowExistsInPostgres() {
+        redis.opsForValue().set("link:"+CACHED_AS_NOT_FOUND_CODE, NEGATIVE_CACHE_ENTRY, Duration.ofSeconds(60));
+
+        Link link = new Link();
+        link.setUserId(1L);
+        link.setShortCode(CACHED_AS_NOT_FOUND_CODE);
+        link.setLongUrl(LONG_URL);
+
+        linkRepository.saveAndFlush(link);
+
+        assertThrows(LinkNotFoundException.class, () -> {
+            linkService.findByShortCode(CACHED_AS_NOT_FOUND_CODE);
+        });
+
+        String redisEntryValue = redis.opsForValue().get("link:"+CACHED_AS_NOT_FOUND_CODE);
+        assertEquals(NEGATIVE_CACHE_ENTRY, redisEntryValue);
+    }
+
+    @Test
+    void shouldWriteNegativeCacheEntryForUnknownShortCode() {
+        assertThrows(LinkNotFoundException.class, () -> {
+            linkService.findByShortCode(CACHED_AS_NOT_FOUND_CODE);
+        });
+
+        String redisEntryValue = redis.opsForValue().get("link:"+CACHED_AS_NOT_FOUND_CODE);
+        assertEquals(NEGATIVE_CACHE_ENTRY, redisEntryValue);
     }
 }

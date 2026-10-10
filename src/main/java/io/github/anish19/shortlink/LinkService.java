@@ -1,5 +1,6 @@
 package io.github.anish19.shortlink;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -26,6 +27,8 @@ public class LinkService {
     private final long TEMP_DEV_USER_ID = 1L;
     private static final String CACHE_PREFIX = "link:";
     private static final Duration DEFAULT_REDIS_TTL = Duration.ofMinutes(10);
+    private static final Duration NEGATIVE_CACHE_ENTRY_REDIS_TTL = Duration.ofMinutes(1);
+    static final String NEGATIVE_CACHE_ENTRY = "__NOT_FOUND__";
 
     private final LinkRepository linkRepository;
     private final StringRedisTemplate redis;
@@ -91,6 +94,13 @@ public class LinkService {
             link.setLongUrl(longUrl);
             try {
                 linkRepository.saveAndFlush(link);
+                String redisKey = CACHE_PREFIX + shortCode;
+                // delete possible Negative Cache entry for the same shortCode
+                try {
+                    redis.delete(redisKey);
+                } catch (DataAccessException ex) {
+                    System.out.println("Redis negative entry delete failed.");
+                }
                 return shortCode;
             } catch (DataIntegrityViolationException e) {
                 //short code collision, retry with new code.
@@ -108,12 +118,15 @@ public class LinkService {
         String valueInRedis = redis.opsForValue().get(redisKey);
         if (valueInRedis == null) {
             System.out.println("Redis doesn't have entry for " + shortCode);
+        } else if (valueInRedis.contentEquals(NEGATIVE_CACHE_ENTRY)) {
+            throw new LinkNotFoundException("Given shortCode is not registered.");
         } else {
             System.out.println("Redis has entry for " + shortCode);
             return valueInRedis;
         }
         Optional<Link> link = linkRepository.findByShortCode(shortCode);
         if (link.isEmpty()) {
+            redis.opsForValue().set(redisKey, NEGATIVE_CACHE_ENTRY, NEGATIVE_CACHE_ENTRY_REDIS_TTL);
             throw new LinkNotFoundException("Given shortCode is not registered.");
         } else if (link.get().getExpiresAt() != null &&
                 link.get().getExpiresAt().isBefore(Instant.now())) {
