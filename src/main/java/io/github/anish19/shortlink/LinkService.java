@@ -5,10 +5,13 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -20,6 +23,7 @@ import java.util.Optional;
 @Service
 public class LinkService {
     private record Cursor(Instant createdAt, Long id) {}
+    private static final Logger log = LoggerFactory.getLogger(LinkService.class);
     private static final int SHORT_URL_LENGTH = 7;
     private static final String ALPHABET =
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -96,11 +100,7 @@ public class LinkService {
                 linkRepository.saveAndFlush(link);
                 String redisKey = CACHE_PREFIX + shortCode;
                 // delete possible Negative Cache entry for the same shortCode
-                try {
-                    redis.delete(redisKey);
-                } catch (DataAccessException ex) {
-                    System.out.println("Redis negative entry delete failed.");
-                }
+                cacheEvict(redisKey);
                 return shortCode;
             } catch (DataIntegrityViolationException e) {
                 //short code collision, retry with new code.
@@ -115,18 +115,18 @@ public class LinkService {
 
     public String findByShortCode(String shortCode) {
         String redisKey = CACHE_PREFIX + shortCode;
-        String valueInRedis = redis.opsForValue().get(redisKey);
+        String valueInRedis = cacheGet(redisKey);
         if (valueInRedis == null) {
-            System.out.println("Redis doesn't have entry for " + shortCode);
+            log.debug("Redis doesn't have entry for {}", shortCode);
         } else if (valueInRedis.contentEquals(NEGATIVE_CACHE_ENTRY)) {
             throw new LinkNotFoundException("Given shortCode is not registered.");
         } else {
-            System.out.println("Redis has entry for " + shortCode);
+            log.debug("Redis has entry for {}", shortCode);
             return valueInRedis;
         }
         Optional<Link> link = linkRepository.findByShortCode(shortCode);
         if (link.isEmpty()) {
-            redis.opsForValue().set(redisKey, NEGATIVE_CACHE_ENTRY, NEGATIVE_CACHE_ENTRY_REDIS_TTL);
+            cacheSet(redisKey, NEGATIVE_CACHE_ENTRY, NEGATIVE_CACHE_ENTRY_REDIS_TTL);
             throw new LinkNotFoundException("Given shortCode is not registered.");
         } else if (link.get().getExpiresAt() != null &&
                 link.get().getExpiresAt().isBefore(Instant.now())) {
@@ -142,7 +142,7 @@ public class LinkService {
         }
 
         if (redisTTL.isPositive()) {
-            redis.opsForValue().set(redisKey, link.get().getLongUrl(), redisTTL);
+            cacheSet(redisKey, link.get().getLongUrl(), redisTTL);
         }
         return link.get().getLongUrl();
     }
@@ -153,7 +153,7 @@ public class LinkService {
             throw new LinkNotFoundException("Short code not found.");
         }
         linkRepository.delete(link);
-        redis.delete(CACHE_PREFIX + shortCode);
+        cacheEvict(CACHE_PREFIX + shortCode);
     }
 
     private boolean isShortCodeCollision(DataIntegrityViolationException e) {
@@ -162,4 +162,30 @@ public class LinkService {
                 && "23505".equals(sql.getSQLState())
                 && cause.getMessage().contains("links_short_code_key");
     }
+
+    private String cacheGet(String key) {
+        try {
+            return redis.opsForValue().get(key);
+        } catch (DataAccessException ex) {
+            log.warn("Redis GET failed for {}: {}", key, ex.getMessage());
+        }
+        return null;
+    }
+
+    private void cacheSet(String key, String value, Duration ttl) {
+        try {
+            redis.opsForValue().set(key, value, ttl);
+        } catch (DataAccessException ex) {
+            log.warn("Could not set {} in cache. {}", key, ex.getMessage());
+        }
+    }
+
+    private void cacheEvict(String key) {
+        try {
+            redis.delete(key);
+        } catch (DataAccessException ex) {
+            log.warn("Could not evict key {} from cache {}", key, ex.getMessage());
+        }
+    }
+
 }
